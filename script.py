@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 
+# Base directory and dataset path
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_PATH = os.path.join(
     BASE_DIR,
@@ -11,74 +12,69 @@ DATA_PATH = os.path.join(
     "data.csv",
 )
 
-# Continuous feature columns (omitting target variable 'GY' and experimental identifiers)
-FEATURE_COLS = ["PH", "IFP", "NLP", "NGP", "NGL", "NS", "MHG"]
-TARGET_COL = "GY"
+# Feature columns (excluding target variable 'GY' and identifiers)
+FEATURES = ["PH", "IFP", "NLP", "NGP", "NGL", "NS", "MHG"]
+TARGET = "GY"
 
 
-def load_data(data_path: str, feature_cols: list[str]):
-    with open(data_path, mode="r", encoding="utf-8") as f:
+def read_dataset(path, feature_cols):
+    rows = []
+    seasons = []
+    targets = []
+    with open(path, mode="r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        rows = []
-        seasons = []
-        targets = []
         for row in reader:
             rows.append([float(row[c]) for c in feature_cols])
             seasons.append(int(row["Season"]))
-            targets.append(float(row[TARGET_COL]))
+            targets.append(float(row[TARGET]))
     return rows, seasons, targets
 
 
-def compute_stats_and_matrices(rows: list[list[float]], feature_cols: list[str]):
+def calculate_matrices(rows, feature_cols):
     n = len(rows)
     p = len(feature_cols)
     means = [sum(rows[i][j] for i in range(n)) / n for j in range(p)]
 
-    # Sample covariance matrix (ddof=1)
-    cov_mat = [[0.0] * p for _ in range(p)]
+    # Sample covariance matrix (n - 1)
+    cov_matrix = [[0.0] * p for _ in range(p)]
     for j1 in range(p):
         for j2 in range(j1, p):
             cov = sum(
                 (rows[i][j1] - means[j1]) * (rows[i][j2] - means[j2])
                 for i in range(n)
             ) / (n - 1)
-            cov_mat[j1][j2] = cov
-            cov_mat[j2][j1] = cov
+            cov_matrix[j1][j2] = cov
+            cov_matrix[j2][j1] = cov
 
-    stds = [math.sqrt(cov_mat[j][j]) for j in range(p)]
+    stds = [math.sqrt(cov_matrix[j][j]) for j in range(p)]
 
     # Pearson correlation matrix
-    corr_mat = [[0.0] * p for _ in range(p)]
+    corr_matrix = [[0.0] * p for _ in range(p)]
     for j1 in range(p):
         for j2 in range(p):
             denom = stds[j1] * stds[j2]
-            corr_mat[j1][j2] = cov_mat[j1][j2] / denom if denom != 0 else 0.0
+            corr_matrix[j1][j2] = cov_matrix[j1][j2] / denom if denom != 0 else 0.0
 
-    # Centered data (for Covariance PCA) and Standardized data (for Correlation PCA)
-    centered_rows = [
+    # Centered data for Covariance PCA, Standardized data for Correlation PCA
+    centered_data = [
         [rows[i][j] - means[j] for j in range(p)]
         for i in range(n)
     ]
-    standardized_rows = [
+    standardized_data = [
         [(rows[i][j] - means[j]) / stds[j] for j in range(p)]
         for i in range(n)
     ]
 
-    return means, stds, cov_mat, corr_mat, centered_rows, standardized_rows
+    return means, stds, cov_matrix, corr_matrix, centered_data, standardized_data
 
 
-def jacobi_eigen(matrix: list[list[float]], tol: float = 1e-12, max_iter: int = 1000):
-    """
-    Computes eigenvalues and eigenvectors of a real symmetric matrix using the Jacobi method.
-    Returns (eigenvalues, eigenvectors_columns) sorted in descending order of eigenvalues.
-    Each eigenvector has its largest-magnitude element forced positive for deterministic signs.
-    """
+def eigen_decomposition(matrix, tol=1e-12, max_iter=1000):
+    # Jacobi eigenvalue algorithm for symmetric matrices
     p = len(matrix)
     A = [row[:] for row in matrix]
     V = [[1.0 if i == j else 0.0 for j in range(p)] for i in range(p)]
 
     for _ in range(max_iter):
-        # Find largest off-diagonal element
         max_val = 0.0
         k, l = 0, 1
         for i in range(p):
@@ -139,16 +135,14 @@ def jacobi_eigen(matrix: list[list[float]], tol: float = 1e-12, max_iter: int = 
             V[i][l] = h_val + s * (g - h_val * tau)
 
     eigenvalues = [A[i][i] for i in range(p)]
-    # Extract columns of V as eigenvectors
     eigenvectors = [[V[row][col] for row in range(p)] for col in range(p)]
 
-    # Sort descending by eigenvalue
+    # Sort eigenvalues and eigenvectors in descending order
     order = sorted(range(p), key=lambda idx: eigenvalues[idx], reverse=True)
     sorted_vals = [max(0.0, eigenvalues[idx]) for idx in order]
     sorted_vecs = []
     for idx in order:
         vec = eigenvectors[idx]
-        # Deterministic sign: make the entry with largest absolute value positive
         max_comp = max(range(p), key=lambda r: abs(vec[r]))
         if vec[max_comp] < 0:
             vec = [-x for x in vec]
@@ -157,37 +151,20 @@ def jacobi_eigen(matrix: list[list[float]], tol: float = 1e-12, max_iter: int = 
     return sorted_vals, sorted_vecs
 
 
-def perform_pca(
-    matrix: list[list[float]],
-    transformed_rows: list[list[float]],
-    stds: list[float],
-    is_corr: bool,
-):
-    """
-    Runs PCA on either Covariance or Correlation matrix.
-    Returns dict with:
-      - eigenvalues
-      - explained_variance_pct
-      - cumulative_variance_pct
-      - eigenvectors: list of p vectors (each of length p), representing the linear combination weights e_k
-      - factor_loadings: p x p matrix (variable i, component k) = corr(X_i, PC_k)
-          For correlation PCA: loading_{i,k} = e_{i,k} * sqrt(lambda_k)
-          For covariance PCA: loading_{i,k} = e_{i,k} * sqrt(lambda_k) / std_i
-      - scores: n x p matrix of principal component scores
-    """
+def run_pca(matrix, data_rows, stds, is_corr):
     p = len(matrix)
-    eigenvalues, eigenvectors = jacobi_eigen(matrix)
+    eigenvalues, eigenvectors = eigen_decomposition(matrix)
     total_var = sum(eigenvalues)
     explained_pct = [(val / total_var) * 100.0 for val in eigenvalues]
-    cum_pct = []
-    running = 0.0
-    for pct in explained_pct:
-        running += pct
-        cum_pct.append(running)
 
-    # Factor loadings (correlations between original variables and PCs)
-    # Also store raw eigenvectors (component weights / loadings in sklearn terminology)
-    factor_loadings = [[0.0] * p for _ in range(p)]  # row = variable i, col = PC k
+    cum_pct = []
+    acc = 0.0
+    for pct in explained_pct:
+        acc += pct
+        cum_pct.append(acc)
+
+    # Factor loadings (correlations between variables and PCs)
+    factor_loadings = [[0.0] * p for _ in range(p)]
     for k in range(p):
         sqrt_lam = math.sqrt(eigenvalues[k])
         for i in range(p):
@@ -196,9 +173,9 @@ def perform_pca(
             else:
                 factor_loadings[i][k] = (eigenvectors[k][i] * sqrt_lam) / stds[i]
 
-    # Project rows onto eigenvectors: scores[row][k]
+    # Principal component scores
     scores = []
-    for row in transformed_rows:
+    for row in data_rows:
         row_scores = [
             sum(row[j] * eigenvectors[k][j] for j in range(p))
             for k in range(p)
@@ -209,13 +186,13 @@ def perform_pca(
         "eigenvalues": eigenvalues,
         "explained_pct": explained_pct,
         "cumulative_pct": cum_pct,
-        "eigenvectors": eigenvectors,  # eigenvectors[k][i] = weight of variable i in PC_{k+1}
-        "factor_loadings": factor_loadings,  # factor_loadings[i][k] = correlation of var i with PC_{k+1}
+        "eigenvectors": eigenvectors,
+        "factor_loadings": factor_loadings,
         "scores": scores,
     }
 
 
-def _svg_to_png(svg_lines: list[str], output_png: str, size_px: int = 1200):
+def export_png(svg_lines, output_png, size_px=1200):
     svg_path = output_png.replace(".png", ".svg")
     with open(svg_path, "w", encoding="utf-8") as f:
         f.write("\n".join(svg_lines))
@@ -233,7 +210,7 @@ def _svg_to_png(svg_lines: list[str], output_png: str, size_px: int = 1200):
         os.remove(svg_path)
 
 
-def _lerp_color(c1: tuple[int, int, int], c2: tuple[int, int, int], t: float) -> tuple[int, int, int]:
+def interpolate_color(c1, c2, t):
     t = max(0.0, min(1.0, t))
     return (
         int(round(c1[0] + (c2[0] - c1[0]) * t)),
@@ -242,7 +219,7 @@ def _lerp_color(c1: tuple[int, int, int], c2: tuple[int, int, int], t: float) ->
     )
 
 
-def _diverging_color(val: float, vmin: float, vmax: float) -> tuple[str, str]:
+def get_heatmap_color(val, vmin, vmax):
     blue = (43, 92, 170)
     light_blue = (158, 202, 225)
     white = (247, 247, 247)
@@ -251,10 +228,10 @@ def _diverging_color(val: float, vmin: float, vmax: float) -> tuple[str, str]:
 
     if val < 0 and vmin < 0:
         ratio = min(1.0, abs(val) / abs(vmin))
-        rgb = _lerp_color(white, light_blue, ratio * 2.0) if ratio < 0.5 else _lerp_color(light_blue, blue, (ratio - 0.5) * 2.0)
+        rgb = interpolate_color(white, light_blue, ratio * 2.0) if ratio < 0.5 else interpolate_color(light_blue, blue, (ratio - 0.5) * 2.0)
     elif val > 0 and vmax > 0:
         ratio = min(1.0, val / vmax)
-        rgb = _lerp_color(white, light_red, ratio * 2.0) if ratio < 0.5 else _lerp_color(light_red, red, (ratio - 0.5) * 2.0)
+        rgb = interpolate_color(white, light_red, ratio * 2.0) if ratio < 0.5 else interpolate_color(light_red, red, (ratio - 0.5) * 2.0)
     else:
         rgb = white
 
@@ -264,14 +241,39 @@ def _diverging_color(val: float, vmin: float, vmax: float) -> tuple[str, str]:
     return bg_hex, text_hex
 
 
-def save_heatmap_image(
-    matrix: list[list[float]],
-    cols: list[str],
-    title: str,
-    subtitle: str,
-    output_png: str,
-    is_corr: bool = True,
-):
+def plot_matrix_heatmap(matrix, cols, title, subtitle, output_png, is_corr=True):
+    try:
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        arr = np.array(matrix)
+        fig, ax = plt.subplots(figsize=(8, 6.5), dpi=200)
+        if is_corr:
+            im = ax.imshow(arr, cmap="coolwarm", vmin=-1.0, vmax=1.0)
+        else:
+            max_abs = np.max(np.abs(arr))
+            im = ax.imshow(arr, cmap="coolwarm", vmin=-max_abs, vmax=max_abs)
+
+        ax.set_xticks(range(len(cols)))
+        ax.set_yticks(range(len(cols)))
+        ax.set_xticklabels(cols, fontsize=11, fontweight="bold")
+        ax.set_yticklabels(cols, fontsize=11, fontweight="bold")
+        ax.set_title(f"{title}\n{subtitle}", fontsize=13, fontweight="bold", pad=15)
+
+        for i in range(len(cols)):
+            for j in range(len(cols)):
+                val = arr[i, j]
+                txt = f"{val:.2f}" if abs(val) < 100 else f"{val:.1f}"
+                ax.text(j, i, txt, ha="center", va="center", fontsize=10)
+
+        fig.colorbar(im, ax=ax, shrink=0.82)
+        fig.tight_layout()
+        fig.savefig(output_png, dpi=200)
+        plt.close(fig)
+        return
+    except ImportError:
+        pass
+
     size = 900
     n = len(cols)
     grid_x = 120
@@ -316,7 +318,7 @@ def save_heatmap_image(
                 scaled_val = math.copysign(math.log1p(abs(val)), val)
                 val_str = f"{val:.1f}" if abs(val) >= 100 else f"{val:.2f}"
 
-            bg_hex, text_hex = _diverging_color(scaled_val, vmin, vmax)
+            bg_hex, text_hex = get_heatmap_color(scaled_val, vmin, vmax)
             x = grid_x + j * cell_size
             y = grid_y + i * cell_size
             svg_lines.append(
@@ -339,7 +341,7 @@ def save_heatmap_image(
     for s in range(steps):
         frac = 1.0 - (s / (steps - 1))
         c_val = vmin + frac * (vmax - vmin)
-        bg_hex, _ = _diverging_color(c_val, vmin, vmax)
+        bg_hex, _ = get_heatmap_color(c_val, vmin, vmax)
         sy = cb_y + s * step_h
         svg_lines.append(
             f'  <rect x="{cb_x}" y="{sy:.2f}" width="{cb_w}" height="{step_h + 1:.2f}" fill="{bg_hex}" stroke="none"/>'
@@ -364,10 +366,10 @@ def save_heatmap_image(
         )
 
     svg_lines.append("</svg>")
-    _svg_to_png(svg_lines, output_png)
+    export_png(svg_lines, output_png)
 
 
-def save_scree_plot(pca_res: dict, title: str, subtitle: str, output_png: str):
+def plot_scree(pca_res, title, subtitle, output_png):
     width, height = 900, 900
     plot_x, plot_y = 110, 175
     plot_w, plot_h = 720, 560
@@ -384,7 +386,6 @@ def save_scree_plot(pca_res: dict, title: str, subtitle: str, output_png: str):
         f'  <text x="{width // 2}" y="102" font-family="Helvetica, Arial, sans-serif" font-size="16" fill="#475569" text-anchor="middle">{subtitle}</text>',
     ]
 
-    # Horizontal grid lines (0% to 100%)
     for pct_tick in [0, 20, 40, 60, 80, 90, 95, 100]:
         y = plot_y + plot_h - (pct_tick / 100.0) * plot_h
         is_thresh = pct_tick in (90, 95)
@@ -399,11 +400,9 @@ def save_scree_plot(pca_res: dict, title: str, subtitle: str, output_png: str):
             f'  <text x="{plot_x - 14}" y="{y + 5:.1f}" font-family="Helvetica, Arial, sans-serif" font-size="13"{font_w} fill="{label_color}" text-anchor="end">{pct_tick}%</text>'
         )
 
-    # Y-axis title
     svg.append(
         f'  <text x="38" y="{plot_y + plot_h / 2}" font-family="Helvetica, Arial, sans-serif" font-size="17" font-weight="bold" fill="#1e293b" text-anchor="middle" transform="rotate(-90 38 {plot_y + plot_h / 2})">Explained Variance (%)</text>'
     )
-    # X-axis title
     svg.append(
         f'  <text x="{plot_x + plot_w / 2}" y="{plot_y + plot_h + 80}" font-family="Helvetica, Arial, sans-serif" font-size="17" font-weight="bold" fill="#1e293b" text-anchor="middle">Principal Component</text>'
     )
@@ -418,11 +417,9 @@ def save_scree_plot(pca_res: dict, title: str, subtitle: str, output_png: str):
         bx = cx - bar_w / 2
         by = plot_y + plot_h - bar_h
 
-        # Bar for individual explained variance
         svg.append(
             f'  <rect x="{bx:.1f}" y="{by:.1f}" width="{bar_w:.1f}" height="{max(1.5, bar_h):.1f}" fill="#3b82f6" fill-opacity="0.82" rx="3"/>'
         )
-        # Value label: for PC1 where cumulative == individual, place bar label inside/below or only show cumulative on top
         if i > 0:
             svg.append(
                 f'  <text x="{cx:.1f}" y="{by - 8:.1f}" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="bold" fill="#1d4ed8" text-anchor="middle">{explained[i]:.1f}%</text>'
@@ -431,7 +428,7 @@ def save_scree_plot(pca_res: dict, title: str, subtitle: str, output_png: str):
             svg.append(
                 f'  <text x="{cx:.1f}" y="{by + 24:.1f}" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">{explained[i]:.1f}%</text>'
             )
-        # X-axis PC label & eigenvalue
+
         svg.append(
             f'  <text x="{cx:.1f}" y="{plot_y + plot_h + 26}" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="bold" fill="#1e293b" text-anchor="middle">PC{i + 1}</text>'
         )
@@ -443,7 +440,6 @@ def save_scree_plot(pca_res: dict, title: str, subtitle: str, output_png: str):
         cy_cum = plot_y + plot_h - (cum_pct[i] / 100.0) * plot_h
         cum_points.append((cx, cy_cum, cum_pct[i]))
 
-    # Cumulative variance polyline
     poly_str = " ".join(f"{x:.1f},{y:.1f}" for x, y, _ in cum_points)
     svg.append(
         f'  <polyline points="{poly_str}" fill="none" stroke="#ea580c" stroke-width="3.2"/>'
@@ -456,12 +452,10 @@ def save_scree_plot(pca_res: dict, title: str, subtitle: str, output_png: str):
             f'  <text x="{x:.1f}" y="{y - 12:.1f}" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="bold" fill="#c2410c" text-anchor="middle">{pct:.1f}%</text>'
         )
 
-    # Plot frame
     svg.append(
         f'  <rect x="{plot_x}" y="{plot_y}" width="{plot_w}" height="{plot_h}" fill="none" stroke="#334155" stroke-width="2"/>'
     )
 
-    # Legend box placed in bottom-right of plot area (where bars are low and cumulative line is at top)
     leg_x, leg_y = plot_x + plot_w - 255, plot_y + plot_h - 140
     svg.append(
         f'  <rect x="{leg_x}" y="{leg_y}" width="235" height="82" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5" rx="6"/>'
@@ -489,17 +483,10 @@ def save_scree_plot(pca_res: dict, title: str, subtitle: str, output_png: str):
     )
 
     svg.append("</svg>")
-    _svg_to_png(svg, output_png)
+    export_png(svg, output_png)
 
 
-def save_2d_pca_plot(
-    pca_res: dict,
-    seasons: list[int],
-    feature_cols: list[str],
-    title: str,
-    subtitle: str,
-    output_png: str,
-):
+def plot_pca_2d(pca_res, seasons, feature_cols, title, subtitle, output_png):
     width, height = 900, 900
     plot_x, plot_y = 115, 160
     plot_w, plot_h = 720, 620
@@ -514,7 +501,7 @@ def save_2d_pca_plot(
     max_x = max(max(abs(v) for v in xs) * 1.15, 1e-6)
     max_y = max(max(abs(v) for v in ys) * 1.15, 1e-6)
 
-    def to_px(x_val: float, y_val: float) -> tuple[float, float]:
+    def to_px(x_val, y_val):
         px = plot_x + ((x_val + max_x) / (2.0 * max_x)) * plot_w
         py = plot_y + plot_h - ((y_val + max_y) / (2.0 * max_y)) * plot_h
         return px, py
@@ -526,7 +513,6 @@ def save_2d_pca_plot(
         f'  <text x="{width // 2}" y="98" font-family="Helvetica, Arial, sans-serif" font-size="16" fill="#475569" text-anchor="middle">{subtitle}</text>',
     ]
 
-    # Grid lines and ticks
     for i in range(-4, 5):
         frac = i / 4.0
         xv = frac * max_x
@@ -554,7 +540,6 @@ def save_2d_pca_plot(
             f'  <text x="{plot_x - 12}" y="{py + 4:.1f}" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#475569" text-anchor="end">{y_lbl}</text>'
         )
 
-    # Scatter points colored by Season
     for (s, season) in zip(scores, seasons):
         px, py = to_px(s[0], s[1])
         color = "#2563eb" if season == 1 else "#16a34a"
@@ -562,7 +547,6 @@ def save_2d_pca_plot(
             f'  <circle cx="{px:.1f}" cy="{py:.1f}" r="5.0" fill="{color}" fill-opacity="0.72" stroke="#ffffff" stroke-width="0.9"/>'
         )
 
-    # Overlay loading vectors (biplot arrows scaled to 75% of plot radius)
     cx0, cy0 = to_px(0.0, 0.0)
     svg.append(
         '  <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 1 L 10 5 L 0 9 z" fill="#dc2626"/></marker></defs>'
@@ -581,12 +565,10 @@ def save_2d_pca_plot(
             f'  <text x="{tx:.1f}" y="{ty + 4:.1f}" font-family="Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#b91c1c" text-anchor="middle">{col}</text>'
         )
 
-    # Frame
     svg.append(
         f'  <rect x="{plot_x}" y="{plot_y}" width="{plot_w}" height="{plot_h}" fill="none" stroke="#334155" stroke-width="2"/>'
     )
 
-    # Axis titles
     svg.append(
         f'  <text x="{plot_x + plot_w / 2}" y="{plot_y + plot_h + 68}" font-family="Helvetica, Arial, sans-serif" font-size="17" font-weight="bold" fill="#0f172a" text-anchor="middle">PC1 ({explained[0]:.2f}% Explained Variance)</text>'
     )
@@ -594,7 +576,6 @@ def save_2d_pca_plot(
         f'  <text x="36" y="{plot_y + plot_h / 2}" font-family="Helvetica, Arial, sans-serif" font-size="17" font-weight="bold" fill="#0f172a" text-anchor="middle" transform="rotate(-90 36 {plot_y + plot_h / 2})">PC2 ({explained[1]:.2f}% Explained Variance)</text>'
     )
 
-    # Legend inside top-left of plot area
     leg_x, leg_y = plot_x + 18, plot_y + 18
     svg.append(
         f'  <rect x="{leg_x}" y="{leg_y}" width="180" height="86" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5" rx="6"/>'
@@ -607,16 +588,10 @@ def save_2d_pca_plot(
     svg.append(f'  <text x="{leg_x + 36}" y="{leg_y + 72}" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#b91c1c">Feature Loadings</text>')
 
     svg.append("</svg>")
-    _svg_to_png(svg, output_png)
+    export_png(svg, output_png)
 
 
-def save_3d_pca_plot(
-    pca_res: dict,
-    seasons: list[int],
-    title: str,
-    subtitle: str,
-    output_png: str,
-):
+def plot_pca_3d(pca_res, seasons, title, subtitle, output_png):
     width, height = 900, 900
     cx_center, cy_center = 450, 485
     scale = 215.0
@@ -632,13 +607,10 @@ def save_3d_pca_plot(
     max_y = max(max(abs(v) for v in ys) * 1.1, 1e-6)
     max_z = max(max(abs(v) for v in zs) * 1.1, 1e-6)
 
-    # Isometric /axonometric 3D projection:
-    # u in [-1, 1] (PC1), v in [-1, 1] (PC2), w in [-1, 1] (PC3, vertical)
     az = math.radians(38.0)
     el = math.radians(24.0)
 
-    def project_3d(u: float, v: float, w: float) -> tuple[float, float, float]:
-        # Rotate around vertical w-axis by az, then tilt by el
+    def project_3d(u, v, w):
         x_rot = u * math.cos(az) - v * math.sin(az)
         y_rot = u * math.sin(az) + v * math.cos(az)
         px = cx_center + scale * x_rot
@@ -653,11 +625,8 @@ def save_3d_pca_plot(
         f'  <text x="{width // 2}" y="98" font-family="Helvetica, Arial, sans-serif" font-size="16" fill="#475569" text-anchor="middle">{subtitle}</text>',
     ]
 
-    # Draw 3D bounding cube and back grid planes
-    # Back planes: u = -1, v = 1, w = -1
     grid_ticks = [-1.0, -0.5, 0.0, 0.5, 1.0]
 
-    # Floor grid (w = -1)
     for t in grid_ticks:
         p1 = project_3d(t, -1.0, -1.0)
         p2 = project_3d(t, 1.0, -1.0)
@@ -666,7 +635,6 @@ def save_3d_pca_plot(
         p4 = project_3d(1.0, t, -1.0)
         svg.append(f'  <line x1="{p3[0]:.1f}" y1="{p3[1]:.1f}" x2="{p4[0]:.1f}" y2="{p4[1]:.1f}" stroke="#e2e8f0" stroke-width="1.2"/>')
 
-    # Back-left wall (u = -1)
     for t in grid_ticks:
         p1 = project_3d(-1.0, t, -1.0)
         p2 = project_3d(-1.0, t, 1.0)
@@ -675,7 +643,6 @@ def save_3d_pca_plot(
         p4 = project_3d(-1.0, 1.0, t)
         svg.append(f'  <line x1="{p3[0]:.1f}" y1="{p3[1]:.1f}" x2="{p4[0]:.1f}" y2="{p4[1]:.1f}" stroke="#f1f5f9" stroke-width="1.2"/>')
 
-    # Back-right wall (v = 1)
     for t in grid_ticks:
         p1 = project_3d(t, 1.0, -1.0)
         p2 = project_3d(t, 1.0, 1.0)
@@ -684,7 +651,6 @@ def save_3d_pca_plot(
         p4 = project_3d(1.0, 1.0, t)
         svg.append(f'  <line x1="{p3[0]:.1f}" y1="{p3[1]:.1f}" x2="{p4[0]:.1f}" y2="{p4[1]:.1f}" stroke="#f1f5f9" stroke-width="1.2"/>')
 
-    # Origin axes inside cube (u=0, v=0, w=0)
     o_u1, o_u2 = project_3d(-1.0, 0.0, 0.0), project_3d(1.05, 0.0, 0.0)
     o_v1, o_v2 = project_3d(0.0, -1.0, 0.0), project_3d(0.0, 1.05, 0.0)
     o_w1, o_w2 = project_3d(0.0, 0.0, -1.0), project_3d(0.0, 0.0, 1.05)
@@ -693,7 +659,6 @@ def save_3d_pca_plot(
     svg.append(f'  <line x1="{o_v1[0]:.1f}" y1="{o_v1[1]:.1f}" x2="{o_v2[0]:.1f}" y2="{o_v2[1]:.1f}" stroke="#64748b" stroke-width="1.6" stroke-dasharray="5,4"/>')
     svg.append(f'  <line x1="{o_w1[0]:.1f}" y1="{o_w1[1]:.1f}" x2="{o_w2[0]:.1f}" y2="{o_w2[1]:.1f}" stroke="#64748b" stroke-width="1.6" stroke-dasharray="5,4"/>')
 
-    # Outer frame edges of the 3D box
     box_edges = [
         ((-1, -1, -1), (1, -1, -1)),
         ((1, -1, -1), (1, 1, -1)),
@@ -713,27 +678,22 @@ def save_3d_pca_plot(
         p2 = project_3d(*c2)
         svg.append(f'  <line x1="{p1[0]:.1f}" y1="{p1[1]:.1f}" x2="{p2[0]:.1f}" y2="{p2[1]:.1f}" stroke="#94a3b8" stroke-width="1.5"/>')
 
-    # Axis ticks and labels on outer edges
     for frac in [-1.0, 0.0, 1.0]:
-        # PC1 axis along (u, -1, -1)
         p_u = project_3d(frac, -1.0, -1.0)
         val_u = frac * max_x
         lbl_u = f"{val_u:.0f}" if max_x >= 20 else f"{val_u:.1f}"
         svg.append(f'  <text x="{p_u[0] - 8:.1f}" y="{p_u[1] + 20:.1f}" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#475569" text-anchor="middle">{lbl_u}</text>')
 
-        # PC2 axis along (1, v, -1)
         p_v = project_3d(1.0, frac, -1.0)
         val_v = frac * max_y
         lbl_v = f"{val_v:.0f}" if max_y >= 20 else f"{val_v:.1f}"
         svg.append(f'  <text x="{p_v[0] + 18:.1f}" y="{p_v[1] + 14:.1f}" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#475569" text-anchor="start">{lbl_v}</text>')
 
-        # PC3 axis along (-1, -1, w)
         p_w = project_3d(-1.0, -1.0, frac)
         val_w = frac * max_z
         lbl_w = f"{val_w:.0f}" if max_z >= 20 else f"{val_w:.1f}"
         svg.append(f'  <text x="{p_w[0] - 14:.1f}" y="{p_w[1] + 4:.1f}" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#475569" text-anchor="end">{lbl_w}</text>')
 
-    # Project and depth-sort all data points (painter's algorithm: back to front)
     projected_pts = []
     for s, season in zip(scores, seasons):
         u = s[0] / max_x
@@ -745,20 +705,17 @@ def save_3d_pca_plot(
 
     projected_pts.sort(key=lambda item: item[0], reverse=True)
 
-    # Subtle drop shadows on the w=-1 floor for 3D depth perception
     for _, _, _, fpx, fpy, _ in projected_pts:
         svg.append(
             f'  <circle cx="{fpx:.1f}" cy="{fpy:.1f}" r="2.2" fill="#cbd5e1" fill-opacity="0.55"/>'
         )
 
-    # 3D points
     for _, px, py, _, _, season in projected_pts:
         color = "#2563eb" if season == 1 else "#16a34a"
         svg.append(
             f'  <circle cx="{px:.1f}" cy="{py:.1f}" r="5.0" fill="{color}" fill-opacity="0.78" stroke="#ffffff" stroke-width="0.9"/>'
         )
 
-    # Axis titles
     lbl_pc1 = project_3d(0.0, -1.32, -1.15)
     lbl_pc2 = project_3d(1.32, 0.0, -1.15)
     lbl_pc3 = project_3d(-1.32, -1.15, 0.0)
@@ -773,7 +730,6 @@ def save_3d_pca_plot(
         f'  <text x="{lbl_pc3[0]:.1f}" y="{lbl_pc3[1]:.1f}" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="bold" fill="#0f172a" text-anchor="end">PC3 ({explained[2]:.2f}%)</text>'
     )
 
-    # Legend inside top-right with safe margin
     leg_x, leg_y = width - 250, 140
     svg.append(
         f'  <rect x="{leg_x}" y="{leg_y}" width="185" height="86" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5" rx="6"/>'
@@ -786,13 +742,13 @@ def save_3d_pca_plot(
     svg.append(f'  <text x="{leg_x + 36}" y="{leg_y + 72}" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#64748b">Floor Projection</text>')
 
     svg.append("</svg>")
-    _svg_to_png(svg, output_png)
+    export_png(svg, output_png)
 
 
-def print_pca_summary(name: str, pca_res: dict, feature_cols: list[str], is_corr: bool):
-    print(f"\n{'=' * 78}")
-    print(f"PCA SUMMARY: {name}")
-    print(f"{'=' * 78}")
+def print_results(name, pca_res, feature_cols, is_corr):
+    print(f"\n{'=' * 75}")
+    print(f"PCA RESULTS: {name}")
+    print(f"{'=' * 75}")
 
     eigenvalues = pca_res["eigenvalues"]
     explained = pca_res["explained_pct"]
@@ -801,7 +757,7 @@ def print_pca_summary(name: str, pca_res: dict, feature_cols: list[str], is_corr
     loadings = pca_res["factor_loadings"]
     p = len(feature_cols)
 
-    print("\n1. Eigenvalues Table:")
+    print("\nEigenvalues Table:")
     print(f"{'PC':<6} {'Eigenvalue':>14} {'Variance (%)':>16} {'Cumulative (%)':>18}")
     print("-" * 58)
     for k in range(p):
@@ -809,12 +765,12 @@ def print_pca_summary(name: str, pca_res: dict, feature_cols: list[str], is_corr
 
     for thresh in (90.0, 95.0, 99.0):
         num_pcs = next(k + 1 for k, c in enumerate(cum_pct) if c >= thresh)
-        print(f"-> PCs needed for >= {thresh:.0f}% variability: {num_pcs} (Cumulative = {cum_pct[num_pcs - 1]:.2f}%)")
+        print(f"Components for {thresh:.0f}% variability: {num_pcs} ({cum_pct[num_pcs - 1]:.2f}%)")
 
-    print(f"-> First 2 PCs explain: {cum_pct[1]:.2f}% of total variability")
-    print(f"-> First 3 PCs explain: {cum_pct[2]:.2f}% of total variability")
+    print(f"First 2 PCs variability: {cum_pct[1]:.2f}%")
+    print(f"First 3 PCs variability: {cum_pct[2]:.2f}%")
 
-    print("\n2. Eigenvectors (Component Weights / Linear Combination Coefficients):")
+    print("\nEigenvectors (Component Weights):")
     header = f"{'Variable':<10}" + "".join(f"{'PC' + str(k + 1):>10}" for k in range(p))
     print(header)
     print("-" * len(header))
@@ -822,14 +778,14 @@ def print_pca_summary(name: str, pca_res: dict, feature_cols: list[str], is_corr
         row_str = f"{col:<10}" + "".join(f"{eigenvectors[k][i]:>10.4f}" for k in range(p))
         print(row_str)
 
-    print("\n3. Factor Loadings (Correlations between Original Variables and PCs):")
+    print("\nFactor Loadings:")
     print(header)
     print("-" * len(header))
     for i, col in enumerate(feature_cols):
         row_str = f"{col:<10}" + "".join(f"{loadings[i][k]:>10.4f}" for k in range(p))
         print(row_str)
 
-    print("\n4. Mathematical Equations of First Three Principal Components:")
+    print("\nEquations of First Three Principal Components:")
     var_suffix = "*" if is_corr else "'"
     for k in range(3):
         terms = []
@@ -837,94 +793,87 @@ def print_pca_summary(name: str, pca_res: dict, feature_cols: list[str], is_corr
             coeff = eigenvectors[k][i]
             sign = "+" if coeff >= 0 else "-"
             if i == 0:
-                terms.append(f"{coeff:.4f}·{col}{var_suffix}")
+                terms.append(f"{coeff:.4f}*{col}{var_suffix}")
             else:
-                terms.append(f" {sign} {abs(coeff):.4f}·{col}{var_suffix}")
+                terms.append(f" {sign} {abs(coeff):.4f}*{col}{var_suffix}")
         print(f"  PC{k + 1} = " + "".join(terms))
 
 
 def main():
-    rows, seasons, _ = load_data(DATA_PATH, FEATURE_COLS)
-    means, stds, cov_mat, corr_mat, centered_rows, standardized_rows = compute_stats_and_matrices(
-        rows, FEATURE_COLS
+    rows, seasons, _ = read_dataset(DATA_PATH, FEATURES)
+    means, stds, cov_mat, corr_mat, centered_data, standardized_data = calculate_matrices(
+        rows, FEATURES
     )
 
-    print("Feature Means and Standard Deviations:")
-    for col, m, s in zip(FEATURE_COLS, means, stds):
-        print(f"  {col:<5}: mean = {m:8.4f}, std = {s:8.4f}")
+    pca_cov = run_pca(cov_mat, centered_data, stds, is_corr=False)
+    pca_corr = run_pca(corr_mat, standardized_data, stds, is_corr=True)
 
-    # Run PCA on Covariance Matrix and Correlation Matrix
-    pca_cov = perform_pca(cov_mat, centered_rows, stds, is_corr=False)
-    pca_corr = perform_pca(corr_mat, standardized_rows, stds, is_corr=True)
+    print_results("A) PCA USING COVARIANCE MATRIX", pca_cov, FEATURES, is_corr=False)
+    print_results("B) PCA USING CORRELATION MATRIX", pca_corr, FEATURES, is_corr=True)
 
-    print_pca_summary("A) PCA USING COVARIANCE MATRIX", pca_cov, FEATURE_COLS, is_corr=False)
-    print_pca_summary("B) PCA USING CORRELATION MATRIX", pca_corr, FEATURE_COLS, is_corr=True)
-
-    # Save all required plots
-    save_heatmap_image(
+    # Save matrix heatmaps
+    plot_matrix_heatmap(
         cov_mat,
-        FEATURE_COLS,
+        FEATURES,
         title="Sample Covariance Matrix",
-        subtitle="Soybean Cultivars Features (Target 'GY' Omitted, Log-Scaled Colors)",
+        subtitle="Soybean Cultivars Features (Target 'GY' Omitted)",
         output_png=os.path.join(BASE_DIR, "covariance_matrix.png"),
         is_corr=False,
     )
-    save_heatmap_image(
+    plot_matrix_heatmap(
         corr_mat,
-        FEATURE_COLS,
+        FEATURES,
         title="Pearson Correlation Matrix",
         subtitle="Soybean Cultivars Features (Target 'GY' Omitted)",
         output_png=os.path.join(BASE_DIR, "correlation_matrix.png"),
         is_corr=True,
     )
 
-    # Covariance PCA plots
-    save_scree_plot(
+    # Covariance PCA figures
+    plot_scree(
         pca_cov,
         title="Scree Plot - PCA on Covariance Matrix",
-        subtitle="Individual and Cumulative Explained Variance across Principal Components",
+        subtitle="Individual and Cumulative Explained Variance",
         output_png=os.path.join(BASE_DIR, "cov_scree_plot.png"),
     )
-    save_2d_pca_plot(
+    plot_pca_2d(
         pca_cov,
         seasons,
-        FEATURE_COLS,
-        title="2D PCA Projection (PC1 vs PC2) - Covariance Matrix",
+        FEATURES,
+        title="2D PCA Plot (PC1 vs PC2) - Covariance Matrix",
         subtitle=f"First Two PCs Explain {pca_cov['cumulative_pct'][1]:.2f}% of Total Variance",
         output_png=os.path.join(BASE_DIR, "cov_pca_2d.png"),
     )
-    save_3d_pca_plot(
+    plot_pca_3d(
         pca_cov,
         seasons,
-        title="3D PCA Projection (PC1, PC2, PC3) - Covariance Matrix",
+        title="3D PCA Plot (PC1, PC2, PC3) - Covariance Matrix",
         subtitle=f"First Three PCs Explain {pca_cov['cumulative_pct'][2]:.2f}% of Total Variance",
         output_png=os.path.join(BASE_DIR, "cov_pca_3d.png"),
     )
 
-    # Correlation PCA plots
-    save_scree_plot(
+    # Correlation PCA figures
+    plot_scree(
         pca_corr,
         title="Scree Plot - PCA on Correlation Matrix",
-        subtitle="Individual and Cumulative Explained Variance across Principal Components",
+        subtitle="Individual and Cumulative Explained Variance",
         output_png=os.path.join(BASE_DIR, "corr_scree_plot.png"),
     )
-    save_2d_pca_plot(
+    plot_pca_2d(
         pca_corr,
         seasons,
-        FEATURE_COLS,
-        title="2D PCA Projection (PC1 vs PC2) - Correlation Matrix",
+        FEATURES,
+        title="2D PCA Plot (PC1 vs PC2) - Correlation Matrix",
         subtitle=f"First Two PCs Explain {pca_corr['cumulative_pct'][1]:.2f}% of Total Variance",
         output_png=os.path.join(BASE_DIR, "corr_pca_2d.png"),
     )
-    save_3d_pca_plot(
+    plot_pca_3d(
         pca_corr,
         seasons,
-        title="3D PCA Projection (PC1, PC2, PC3) - Correlation Matrix",
+        title="3D PCA Plot (PC1, PC2, PC3) - Correlation Matrix",
         subtitle=f"First Three PCs Explain {pca_corr['cumulative_pct'][2]:.2f}% of Total Variance",
         output_png=os.path.join(BASE_DIR, "corr_pca_3d.png"),
     )
-
-    print("\nAll 8 plots generated successfully in workspace directory.")
 
 
 if __name__ == "__main__":
