@@ -11,4 +11,6 @@ This repository is configured to synchronize automatically with GitHub (`https:/
      ```bash
      ./.agents/auto_sync.sh
      ```
-3. **Keep Plots and Report Synchronized:** Whenever `script.py` is modified, always run `python3 script.py` so the PNG charts and `Report_2_PCA.md` stay up to date before pushing.
+3. **Keep Plots, Report, and `report_2/` Synchronized:**
+   - The clean deliverable folder for the professor is `report_2/` (which must remain completely free of any `.agent`, `.agents`, `.git`, or AI-related references).
+   - Whenever `script.py` or `Report_2_PCA.md` is modified, always keep `report_2/script.py`, `report_2/Report_2_PCA.md`, and the PNG charts inside `report_2/` updated and synchronized.
