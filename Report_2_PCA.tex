@@ -1,0 +1,405 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{hyperref}
+
+\graphicspath{{report_2/}}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!60!black,
+    urlcolor=blue!60!black
+}
+
+\title{\textbf{Report 2: Dimension Reduction Methods}\\Principal Component Analysis (PCA)}
+\author{Data Exploration and Analytics}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction and Dataset Description}
+
+Principal Component Analysis (PCA) is a dimension reduction method that transforms a set of correlated variables into a smaller number of uncorrelated linear combinations called \textbf{Principal Components (PCs)}. The main goal of PCA is to retain most of the variability present in the original data while reducing the dimensionality of the dataset.
+
+In this report, we analyze the \textbf{Forty Soybean Cultivars from Subsequent Harvests} dataset ($n = 320$ observations from 40 soybean cultivars across 2 seasons and 4 repetitions). Following the assignment instructions, the target variable \textbf{Grain Yield (\texttt{GY})} and the identification columns (\texttt{Season}, \texttt{Cultivar}, \texttt{Repetition}) are omitted. The analysis is conducted on the 7 continuous agronomic features shown in Table~\ref{tab:dataset}.
+
+\begin{table}[H]
+\centering
+\caption{Descriptive statistics of the 7 soybean features ($n = 320$).}
+\label{tab:dataset}
+\begin{tabular}{llrrr}
+\toprule
+\textbf{Variable} & \textbf{Description} & \textbf{Mean ($\bar{x}$)} & \textbf{Std.\ Dev.\ ($s$)} & \textbf{Variance ($s^2$)} \\
+\midrule
+\texttt{PH}  & Plant Height (cm)                &  68.3868 &  8.9582 &   80.2492 \\
+\texttt{IFP} & Insertion of the First Pod (cm)  &  15.4650 &  3.0243 &    9.1464 \\
+\texttt{NLP} & Number of Pods per Plant         &  59.0883 & 20.0682 &  402.7321 \\
+\texttt{NGP} & Number of Grains per Plant       & 135.0858 & 60.4945 & 3659.5880 \\
+\texttt{NGL} & Number of Grains per Pod         &   2.2908 &  0.8401 &    0.7058 \\
+\texttt{NS}  & Number of Stems                  &   4.0717 &  1.4745 &    2.1742 \\
+\texttt{MHG} & Mass of a Hundred Grains (g)     & 168.3223 & 19.6256 &  385.1628 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Two separate PCA analyses are performed in this study:
+\begin{enumerate}
+    \item \textbf{PCA using the Covariance Matrix}, applied to the mean-centered variables $X'_i = X_i - \bar{X}_i$.
+    \item \textbf{PCA using the Correlation Matrix}, applied to the standardized variables $X^*_i = \frac{X_i - \bar{X}_i}{s_i}$.
+\end{enumerate}
+
+\newpage
+\section{PCA Analysis Using the Covariance Matrix}
+
+\subsection{Covariance Matrix}
+
+Table~\ref{tab:cov_matrix} and Figure~\ref{fig:cov_matrix} present the sample covariance matrix of the 7 features (with target \texttt{GY} omitted). Because the variables are not standardized, \texttt{NGP} ($s^2 = 3659.5880$), \texttt{NLP} ($s^2 = 402.7321$), and \texttt{MHG} ($s^2 = 385.1628$) have much larger numeric variances than \texttt{NGL} ($0.7058$) or \texttt{NS} ($2.1742$).
+
+\begin{table}[H]
+\centering
+\caption{Sample Covariance Matrix (target variable \texttt{GY} omitted).}
+\label{tab:cov_matrix}
+\begin{tabular}{lrrrrrrr}
+\toprule
+ & \textbf{PH} & \textbf{IFP} & \textbf{NLP} & \textbf{NGP} & \textbf{NGL} & \textbf{NS} & \textbf{MHG} \\
+\midrule
+\textbf{PH}  &  80.2492 &   8.8150 &  31.0538 &   34.3979 & -0.6168 & -0.6437 &  -8.1959 \\
+\textbf{IFP} &   8.8150 &   9.1464 &   3.2219 &  -10.5057 & -0.3852 &  1.5356 &  -4.2214 \\
+\textbf{NLP} &  31.0538 &   3.2219 & 402.7321 &  827.7090 & -1.0474 & 15.4437 &  -0.2707 \\
+\textbf{NGP} &  34.3979 & -10.5057 & 827.7090 & 3659.5880 & 31.5865 & 32.0854 &  38.0931 \\
+\textbf{NGL} &  -0.6168 &  -0.3852 &  -1.0474 &   31.5865 &  0.7058 & -0.0911 &   0.8508 \\
+\textbf{NS}  &  -0.6437 &   1.5356 &  15.4437 &   32.0854 & -0.0911 &  2.1742 &  -3.7404 \\
+\textbf{MHG} &  -8.1959 &  -4.2214 &  -0.2707 &   38.0931 &  0.8508 & -3.7404 & 385.1628 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.68\textwidth]{covariance_matrix.png}
+\caption{Heatmap of the Sample Covariance Matrix.}
+\label{fig:cov_matrix}
+\end{figure}
+
+\subsection{Eigenvalues Table (Covariance Matrix)}
+
+Table~\ref{tab:cov_eigen} shows the eigenvalues, individual percentage of explained variance, and cumulative percentage of explained variance for each principal component obtained from the covariance matrix.
+
+\begin{table}[H]
+\centering
+\caption{Eigenvalues and explained variance for PCA on the Covariance Matrix.}
+\label{tab:cov_eigen}
+\begin{tabular}{lrrr}
+\toprule
+\textbf{Component} & \textbf{Eigenvalue ($\lambda_k$)} & \textbf{Explained Variance (\%)} & \textbf{Cumulative Variance (\%)} \\
+\midrule
+\textbf{PC1} & 3859.2795 & 85.01\% &  85.01\% \\
+\textbf{PC2} &  385.6580 &  8.50\% &  93.51\% \\
+\textbf{PC3} &  208.4685 &  4.59\% &  98.10\% \\
+\textbf{PC4} &   76.7777 &  1.69\% &  99.79\% \\
+\textbf{PC5} &    8.3209 &  0.18\% &  99.97\% \\
+\textbf{PC6} &    1.1348 &  0.02\% & 100.00\% \\
+\textbf{PC7} &    0.1193 &  0.00\% & 100.00\% \\
+\midrule
+\textbf{Total} & \textbf{4539.7587} & \textbf{100.00\%} & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+From Table~\ref{tab:cov_eigen}, we can answer the dimensionality questions for the covariance matrix:
+\begin{itemize}
+    \item \textbf{Number of principal components needed to account for:}
+    \begin{itemize}
+        \item \textbf{a) 90\% of variability:} \textbf{2 principal components} (they account for \textbf{93.51\%}).
+        \item \textbf{b) 95\% of variability:} \textbf{3 principal components} (they account for \textbf{98.10\%}).
+        \item \textbf{c) 99\% of variability:} \textbf{4 principal components} (they account for \textbf{99.79\%}).
+    \end{itemize}
+    \item \textbf{Percentage of variability accounted for by the first two and first three PCs:}
+    \begin{itemize}
+        \item \textbf{First 2 PCs:} \textbf{93.51\%}
+        \item \textbf{First 3 PCs:} \textbf{98.10\%}
+    \end{itemize}
+\end{itemize}
+
+\subsection{Scree Plot (Covariance Matrix)}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.72\textwidth]{cov_scree_plot.png}
+\caption{Scree plot showing individual and cumulative explained variance (Covariance Matrix).}
+\label{fig:cov_scree}
+\end{figure}
+
+\subsection{Factor Loadings and Eigenvectors (Covariance Matrix)}
+
+Table~\ref{tab:cov_eigvecs} presents the eigenvectors $e_{ik}$ (linear combination weights), and Table~\ref{tab:cov_loadings} shows the factor loadings $L_{ik} = \text{Corr}(X_i, \text{PC}_k) = \frac{e_{ik}\sqrt{\lambda_k}}{s_i}$.
+
+\begin{table}[H]
+\centering
+\caption{Eigenvectors (component weights $e_{ik}$) for the Covariance Matrix.}
+\label{tab:cov_eigvecs}
+\begin{tabular}{lrrrrrrr}
+\toprule
+\textbf{Variable} & \textbf{PC1} & \textbf{PC2} & \textbf{PC3} & \textbf{PC4} & \textbf{PC5} & \textbf{PC6} & \textbf{PC7} \\
+\midrule
+\textbf{PH}  &  0.0107 & -0.0325 &  0.1676 &  0.9780 & -0.1090 &  0.0485 &  0.0010 \\
+\textbf{IFP} & -0.0024 & -0.0126 &  0.0341 &  0.1126 &  0.9676 & -0.2232 &  0.0022 \\
+\textbf{NLP} &  0.2330 & -0.0561 &  0.9544 & -0.1687 & -0.0229 & -0.0376 &  0.0364 \\
+\textbf{NGP} &  0.9723 &  0.0030 & -0.2311 &  0.0299 &  0.0070 & -0.0009 & -0.0172 \\
+\textbf{NGL} &  0.0079 &  0.0027 & -0.0403 &  0.0065 & -0.0096 & -0.0349 &  0.9985 \\
+\textbf{NS}  &  0.0090 & -0.0117 &  0.0342 & -0.0294 &  0.2262 &  0.9722 &  0.0377 \\
+\textbf{MHG} &  0.0106 &  0.9977 &  0.0608 &  0.0233 &  0.0100 &  0.0082 & -0.0001 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Factor Loadings (correlations between variables and PCs) for the Covariance Matrix.}
+\label{tab:cov_loadings}
+\begin{tabular}{lrrrrrrr}
+\toprule
+\textbf{Variable} & \textbf{PC1} & \textbf{PC2} & \textbf{PC3} & \textbf{PC4} & \textbf{PC5} & \textbf{PC6} & \textbf{PC7} \\
+\midrule
+\textbf{PH}  &  0.0744 & -0.0712 &  0.2702 & \textbf{0.9566} & -0.0351 &  0.0058 &  0.0000 \\
+\textbf{IFP} & -0.0502 & -0.0816 &  0.1627 &  0.3263 & \textbf{0.9229} & -0.0786 &  0.0002 \\
+\textbf{NLP} & \textbf{0.7211} & -0.0549 & \textbf{0.6867} & -0.0737 & -0.0033 & -0.0020 &  0.0006 \\
+\textbf{NGP} & \textbf{0.9985} &  0.0010 & -0.0552 &  0.0043 &  0.0003 &  0.0000 & -0.0001 \\
+\textbf{NGL} & \textbf{0.5839} &  0.0624 & \textbf{-0.6921} &  0.0680 & -0.0330 & -0.0443 &  0.4104 \\
+\textbf{NS}  &  0.3795 & -0.1564 &  0.3344 & -0.1746 &  0.4425 & \textbf{0.7024} &  0.0088 \\
+\textbf{MHG} &  0.0336 & \textbf{0.9984} &  0.0447 &  0.0104 &  0.0015 &  0.0004 &  0.0000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Mathematical Representation of the First Three Principal Components (Covariance Matrix)}
+
+Using the mean-centered variables $X'_i = X_i - \bar{X}_i$, the mathematical equations for the first three principal components are:
+\begin{align}
+\text{PC}_1 &= 0.0107\,\text{PH}' - 0.0024\,\text{IFP}' + 0.2330\,\text{NLP}' + 0.9723\,\text{NGP}' + 0.0079\,\text{NGL}' + 0.0090\,\text{NS}' + 0.0106\,\text{MHG}' \\
+\text{PC}_2 &= -0.0325\,\text{PH}' - 0.0126\,\text{IFP}' - 0.0561\,\text{NLP}' + 0.0030\,\text{NGP}' + 0.0027\,\text{NGL}' - 0.0117\,\text{NS}' + 0.9977\,\text{MHG}' \\
+\text{PC}_3 &= 0.1676\,\text{PH}' + 0.0341\,\text{IFP}' + 0.9544\,\text{NLP}' - 0.2311\,\text{NGP}' - 0.0403\,\text{NGL}' + 0.0342\,\text{NS}' + 0.0608\,\text{MHG}'
+\end{align}
+
+\subsection{2D and 3D Principal Component Plots (Covariance Matrix)}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}[b]{0.49\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{cov_pca_2d.png}
+    \caption{2D Graph (PC1 vs.\ PC2)}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.49\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{cov_pca_3d.png}
+    \caption{3D Graph (PC1, PC2, PC3)}
+\end{subfigure}
+\caption{2D and 3D projections of the principal components using the Covariance Matrix.}
+\label{fig:cov_2d_3d}
+\end{figure}
+
+\subsection{Description and Interpretation (Covariance Matrix PCA)}
+
+In the covariance matrix analysis, the features are kept in their raw measurement units. Because \texttt{NGP} (Number of Grains per Plant) accounts for $3659.59 / 4539.76 = 80.6\%$ of the total dataset variance, \textbf{PC1 (85.01\% of variance)} is almost completely determined by \texttt{NGP} (weight $0.9723$, correlation loading $0.9985$) together with \texttt{NLP} (loading $0.7211$). \textbf{PC2 (8.50\% of variance)} represents almost exclusively \texttt{MHG} (Mass of 100 Grains, weight $0.9977$, loading $0.9984$), while \textbf{PC3 (4.59\% of variance)} captures the remaining variation in \texttt{NLP} (weight $0.9544$) contrasted against \texttt{NGL} (loading $-0.6921$). Variables with small numeric magnitudes such as \texttt{NGL}, \texttt{NS}, and \texttt{IFP} have almost zero weight in the first three components simply because their units produce small variances.
+
+\newpage
+\section{PCA Analysis Using the Correlation Matrix}
+
+\subsection{Correlation Matrix}
+
+Table~\ref{tab:corr_matrix} and Figure~\ref{fig:corr_matrix} display the Pearson correlation matrix. Standardizing all variables to zero mean and unit variance ($s^2 = 1.0$) assigns equal importance to every trait (total variance $= 7.0$).
+
+\begin{table}[H]
+\centering
+\caption{Pearson Correlation Matrix (target variable \texttt{GY} omitted).}
+\label{tab:corr_matrix}
+\begin{tabular}{lrrrrrrr}
+\toprule
+ & \textbf{PH} & \textbf{IFP} & \textbf{NLP} & \textbf{NGP} & \textbf{NGL} & \textbf{NS} & \textbf{MHG} \\
+\midrule
+\textbf{PH}  &  1.0000 &  0.3254 &  0.1727 &  0.0635 & -0.0820 & -0.0487 & -0.0466 \\
+\textbf{IFP} &  0.3254 &  1.0000 &  0.0531 & -0.0574 & -0.1516 &  0.3444 & -0.0711 \\
+\textbf{NLP} &  0.1727 &  0.0531 &  1.0000 &  0.6818 & -0.0621 &  0.5219 & -0.0007 \\
+\textbf{NGP} &  0.0635 & -0.0574 &  0.6818 &  1.0000 &  0.6215 &  0.3597 &  0.0321 \\
+\textbf{NGL} & -0.0820 & -0.1516 & -0.0621 &  0.6215 &  1.0000 & -0.0736 &  0.0516 \\
+\textbf{NS}  & -0.0487 &  0.3444 &  0.5219 &  0.3597 & -0.0736 &  1.0000 & -0.1293 \\
+\textbf{MHG} & -0.0466 & -0.0711 & -0.0007 &  0.0321 &  0.0516 & -0.1293 &  1.0000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.68\textwidth]{correlation_matrix.png}
+\caption{Heatmap of the Pearson Correlation Matrix.}
+\label{fig:corr_matrix}
+\end{figure}
+
+\subsection{Eigenvalues Table (Correlation Matrix)}
+
+Table~\ref{tab:corr_eigen} presents the eigenvalues and explained variance percentages for the PCA performed on the correlation matrix.
+
+\begin{table}[H]
+\centering
+\caption{Eigenvalues and explained variance for PCA on the Correlation Matrix.}
+\label{tab:corr_eigen}
+\begin{tabular}{lrrr}
+\toprule
+\textbf{Component} & \textbf{Eigenvalue ($\lambda_k$)} & \textbf{Explained Variance (\%)} & \textbf{Cumulative Variance (\%)} \\
+\midrule
+\textbf{PC1} & 2.1666 & 30.95\% &  30.95\% \\
+\textbf{PC2} & 1.6165 & 23.09\% &  54.04\% \\
+\textbf{PC3} & 1.0712 & 15.30\% &  69.35\% \\
+\textbf{PC4} & 0.9789 & 13.98\% &  83.33\% \\
+\textbf{PC5} & 0.8147 & 11.64\% &  94.97\% \\
+\textbf{PC6} & 0.3063 &  4.38\% &  99.35\% \\
+\textbf{PC7} & 0.0458 &  0.65\% & 100.00\% \\
+\midrule
+\textbf{Total} & \textbf{7.0000} & \textbf{100.00\%} & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+From Table~\ref{tab:corr_eigen}, we answer the dimensionality questions for the correlation matrix:
+\begin{itemize}
+    \item \textbf{Number of principal components needed to account for:}
+    \begin{itemize}
+        \item \textbf{a) 90\% of variability:} \textbf{5 principal components} (they account for \textbf{94.97\%}).
+        \item \textbf{b) 95\% of variability:} \textbf{6 principal components} (they account for \textbf{99.35\%}).
+        \item \textbf{c) 99\% of variability:} \textbf{6 principal components} (they account for \textbf{99.35\%}).
+    \end{itemize}
+    \item \textbf{Percentage of variability accounted for by the first two and first three PCs:}
+    \begin{itemize}
+        \item \textbf{First 2 PCs:} \textbf{54.04\%}
+        \item \textbf{First 3 PCs:} \textbf{69.35\%}
+    \end{itemize}
+\end{itemize}
+
+\subsection{Scree Plot (Correlation Matrix)}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.72\textwidth]{corr_scree_plot.png}
+\caption{Scree plot showing individual and cumulative explained variance (Correlation Matrix).}
+\label{fig:corr_scree}
+\end{figure}
+
+\subsection{Factor Loadings and Eigenvectors (Correlation Matrix)}
+
+Table~\ref{tab:corr_eigvecs} shows the eigenvectors $e_{ik}$ and Table~\ref{tab:corr_loadings} shows the factor loadings $L_{ik} = e_{ik}\sqrt{\lambda_k}$ for the correlation matrix PCA.
+
+\begin{table}[H]
+\centering
+\caption{Eigenvectors (component weights $e_{ik}$) for the Correlation Matrix.}
+\label{tab:corr_eigvecs}
+\begin{tabular}{lrrrrrrr}
+\toprule
+\textbf{Variable} & \textbf{PC1} & \textbf{PC2} & \textbf{PC3} & \textbf{PC4} & \textbf{PC5} & \textbf{PC6} & \textbf{PC7} \\
+\midrule
+\textbf{PH}  &  0.1227 & -0.3560 &  0.7421 & -0.0686 & -0.3849 &  0.3932 &  0.0080 \\
+\textbf{IFP} &  0.1412 & -0.5538 &  0.2700 & -0.0669 &  0.6209 & -0.4587 & -0.0053 \\
+\textbf{NLP} &  0.5733 & -0.0990 & -0.1316 &  0.2479 & -0.4127 & -0.3701 & -0.5248 \\
+\textbf{NGP} &  0.6016 &  0.3192 &  0.1175 & -0.0569 & -0.0366 & -0.1805 &  0.6966 \\
+\textbf{NGL} &  0.2317 &  0.5682 &  0.3275 & -0.3465 &  0.3717 &  0.1373 & -0.4889 \\
+\textbf{NS}  &  0.4682 & -0.2919 & -0.4052 &  0.0538 &  0.3032 &  0.6607 & -0.0107 \\
+\textbf{MHG} & -0.0389 &  0.2163 &  0.2718 &  0.8962 &  0.2542 &  0.1003 &  0.0012 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Factor Loadings (correlations between variables and PCs) for the Correlation Matrix.}
+\label{tab:corr_loadings}
+\begin{tabular}{lrrrrrrr}
+\toprule
+\textbf{Variable} & \textbf{PC1} & \textbf{PC2} & \textbf{PC3} & \textbf{PC4} & \textbf{PC5} & \textbf{PC6} & \textbf{PC7} \\
+\midrule
+\textbf{PH}  &  0.1806 & -0.4526 & \textbf{0.7680} & -0.0679 & -0.3474 &  0.2176 &  0.0017 \\
+\textbf{IFP} &  0.2078 & \textbf{-0.7042} &  0.2794 & -0.0662 & \textbf{0.5604} & -0.2539 & -0.0011 \\
+\textbf{NLP} & \textbf{0.8439} & -0.1259 & -0.1362 &  0.2452 & -0.3725 & -0.2049 & -0.1123 \\
+\textbf{NGP} & \textbf{0.8854} &  0.4059 &  0.1216 & -0.0563 & -0.0330 & -0.0999 &  0.1490 \\
+\textbf{NGL} &  0.3411 & \textbf{0.7224} &  0.3389 & -0.3429 &  0.3355 &  0.0760 & -0.1046 \\
+\textbf{NS}  & \textbf{0.6892} & -0.3711 & -0.4194 &  0.0532 &  0.2736 &  0.3657 & -0.0023 \\
+\textbf{MHG} & -0.0573 &  0.2750 &  0.2813 & \textbf{0.8867} &  0.2295 &  0.0555 &  0.0003 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Mathematical Representation of the First Three Principal Components (Correlation Matrix)}
+
+Using the standardized variables $X^*_i = \frac{X_i - \bar{X}_i}{s_i}$, the equations for the first three principal components are:
+\begin{align}
+\text{PC}_1 &= 0.1227\,\text{PH}^* + 0.1412\,\text{IFP}^* + 0.5733\,\text{NLP}^* + 0.6016\,\text{NGP}^* + 0.2317\,\text{NGL}^* + 0.4682\,\text{NS}^* - 0.0389\,\text{MHG}^* \\
+\text{PC}_2 &= -0.3560\,\text{PH}^* - 0.5538\,\text{IFP}^* - 0.0990\,\text{NLP}^* + 0.3192\,\text{NGP}^* + 0.5682\,\text{NGL}^* - 0.2919\,\text{NS}^* + 0.2163\,\text{MHG}^* \\
+\text{PC}_3 &= 0.7421\,\text{PH}^* + 0.2700\,\text{IFP}^* - 0.1316\,\text{NLP}^* + 0.1175\,\text{NGP}^* + 0.3275\,\text{NGL}^* - 0.4052\,\text{NS}^* + 0.2718\,\text{MHG}^*
+\end{align}
+
+\subsection{2D and 3D Principal Component Plots (Correlation Matrix)}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}[b]{0.49\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{corr_pca_2d.png}
+    \caption{2D Graph (PC1 vs.\ PC2)}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.49\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{corr_pca_3d.png}
+    \caption{3D Graph (PC1, PC2, PC3)}
+\end{subfigure}
+\caption{2D and 3D projections of the principal components using the Correlation Matrix.}
+\label{fig:corr_2d_3d}
+\end{figure}
+
+\subsection{Description and Interpretation (Correlation Matrix PCA)}
+
+When all variables are standardized, each trait has a variance of $1.0$, revealing the underlying structure of the data:
+\begin{itemize}
+    \item \textbf{PC1 (30.95\% of variance)} has strong positive loadings with \texttt{NGP} ($0.8854$), \texttt{NLP} ($0.8439$), and \texttt{NS} ($0.6892$). It represents \textbf{overall plant reproductive capacity} (number of stems, pods, and grains per plant). In the 2D plot, Season~1 observations tend to score higher on PC1 than Season~2 observations.
+    \item \textbf{PC2 (23.09\% of variance)} has a high positive loading on \texttt{NGL} ($0.7224$) and strong negative loadings on \texttt{IFP} ($-0.7042$) and \texttt{PH} ($-0.4526$). It contrasts \textbf{pod fertility (grains per pod) against pod insertion height and plant stature}.
+    \item \textbf{PC3 (15.30\% of variance)} is mainly driven by \texttt{PH} ($0.7680$) opposed to \texttt{NS} ($-0.4194$), distinguishing tall, single-stem plants from shorter, multi-stem plants.
+    \item \textbf{PC4 (13.98\% of variance)} is dominated by \texttt{MHG} ($0.8867$), confirming that hundred-grain mass varies almost independently from pod and stem counts.
+    \item \textbf{PC7 (0.65\% of variance)} is close to zero ($\lambda_7 = 0.0458$) because \texttt{NGP} is directly related to \texttt{NLP} and \texttt{NGL} ($\text{NGP} \approx \text{NLP} \times \text{NGL}$), which explains why 6 components already capture \textbf{99.35\%} of the total variance.
+\end{itemize}
+
+\section{Comparison and Conclusions}
+
+\begin{table}[H]
+\centering
+\caption{Comparison between Covariance Matrix PCA and Correlation Matrix PCA.}
+\label{tab:comparison}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Metric} & \textbf{a) Covariance Matrix PCA} & \textbf{b) Correlation Matrix PCA} \\
+\midrule
+Variance explained by first 2 PCs & 93.51\% & 54.04\% \\
+Variance explained by first 3 PCs & 98.10\% & 69.35\% \\
+PCs needed for $\ge 90\%$ variability & 2 PCs (93.51\%) & 5 PCs (94.97\%) \\
+PCs needed for $\ge 95\%$ variability & 3 PCs (98.10\%) & 6 PCs (99.35\%) \\
+PCs needed for $\ge 99\%$ variability & 4 PCs (99.79\%) & 6 PCs (99.35\%) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{enumerate}
+    \item \textbf{Sensitivity to Measurement Scales:} In the Covariance Matrix PCA, the results are dominated by variables with large numeric values (\texttt{NGP} with variance $3659.59$, \texttt{NLP} with $402.73$, and \texttt{MHG} with $385.16$). As a consequence, the first two components appear to account for $93.51\%$ of the variance, while small-scale variables such as \texttt{NGL} and \texttt{NS} are virtually ignored.
+    \item \textbf{Suitability of the Correlation Matrix:} Because the 7 features are measured in different physical units (centimeters, counts, ratios, and grams) and have very different variances, \textbf{PCA on the Correlation Matrix is the appropriate method for this dataset}. Standardization ensures that all agronomic traits contribute equally and reveals interpretable biological dimensions across the components.
+\end{enumerate}
+
+\end{document}
