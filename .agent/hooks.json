@@ -1,0 +1,24 @@
+{
+  "github-auto-sync": {
+    "enabled": true,
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "./auto_sync.sh",
+        "timeout": 20
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "write_file|edit_file|run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./auto_sync.sh",
+            "timeout": 25
+          }
+        ]
+      }
+    ]
+  }
+}
