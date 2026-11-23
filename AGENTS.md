@@ -11,6 +11,6 @@ This repository is configured to synchronize automatically with GitHub (`https:/
      ```bash
      ./.agents/auto_sync.sh
      ```
-3. **Keep Plots, Report, and `report_2/` Synchronized:**
-   - The clean deliverable folder for the professor is `report_2/` (which must remain completely free of any `.agent`, `.agents`, `.git`, or AI-related references).
-   - Whenever `script.py` or `Report_2_PCA.md` is modified, always keep `report_2/script.py`, `report_2/Report_2_PCA.md`, and the PNG charts inside `report_2/` updated and synchronized.
+3. **Single Deliverable Folder (`report_2/`):**
+   - All project deliverables (`script.py`, `Report_2_PCA.md`, the PNG charts, and the dataset folder `forty+soybean+cultivars+from+subsequent+harvests/`) live **exclusively** inside `report_2/`. Do not duplicate them in the workspace root.
+   - `report_2/` must remain completely clean of any `.agent`, `.agents`, `.git`, or AI-related references so it can be submitted directly to the professor.
