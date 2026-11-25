@@ -22,15 +22,15 @@
     citecolor=blue!50!black
 }
 
-\title{\textbf{Data Exploration and Analytics: Report 2}\\[0.4em]
-\large Dimension Reduction Methods (PCA) on Forty Soybean Cultivars from Subsequent Harvests}
+\title{\vspace{3cm}\textbf{\LARGE Data Exploration and Analytics: Assignment 03}\\[0.4em]
+\large Dimension Reduction Methods on Forty Soybean Cultivars from Subsequent Harvests}
 \author{Claudia Rodr\'iguez Lorenzo, Leire Guevara Rom\'an, V\'ictor Mu\~noz Cuadrado}
 \date{November 25, 2026}
 
 \begin{document}
 
 \maketitle
-
+\vspace{0.6cm}
 \begin{abstract}
 \noindent
 This report presents a Principal Component Analysis (PCA) of the \textit{Forty Soybean Cultivars from Subsequent Harvests} dataset ($n = 320$ observations). Following the assignment instructions, the target variable Grain Yield (\texttt{GY}) and the experimental design identifiers (\texttt{Season}, \texttt{Cultivar}, \texttt{Repetition}) are omitted, leaving 7 continuous agronomic features (\texttt{PH}, \texttt{IFP}, \texttt{NLP}, \texttt{NGP}, \texttt{NGL}, \texttt{NS}, and \texttt{MHG}). Using Python (\texttt{script.py}), two separate PCA analyses are performed and compared: first using the sample covariance matrix (on mean-centered variables) and second using the Pearson correlation matrix (on standardized variables). For each method, we examine the matrix structure, eigenvalues, explained variance thresholds (90\%, 95\%, and 99\%), scree plots, eigenvectors, factor loadings, mathematical equations of the first three principal components, and 2D and 3D component projections.
